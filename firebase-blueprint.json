@@ -1,0 +1,216 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Public display profile for an authenticated Tactix player (no PII).",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Player display name",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "photoURL": {
+          "type": "string",
+          "description": "Optional avatar URL or empty string",
+          "maxLength": 500
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of profile creation"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update"
+        }
+      },
+      "required": ["uid", "displayName", "photoURL", "createdAt", "updatedAt"]
+    },
+    "GameMatch": {
+      "title": "GameMatch",
+      "description": "A Tic-Tac-Toe match header document whose board state is reconstructed from its events subcollection.",
+      "type": "object",
+      "properties": {
+        "gameId": {
+          "type": "string",
+          "description": "Short 6-character uppercase match code",
+          "minLength": 6,
+          "maxLength": 12,
+          "pattern": "^[A-Z0-9]+$"
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["ai", "pvp"],
+          "description": "Opponent mode: Minimax AI or Peer-to-Peer multiplayer"
+        },
+        "aiDifficulty": {
+          "type": "string",
+          "enum": ["apprentice", "tactician", "grandmaster", "none"],
+          "description": "Minimax AI difficulty level or none for PvP"
+        },
+        "creatorUid": {
+          "type": "string",
+          "description": "UID of the user who created the match",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "playerXUid": {
+          "type": "string",
+          "description": "UID of Player X, AI_MINIMAX, or OPEN_SEAT",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "playerXName": {
+          "type": "string",
+          "description": "Display name for Player X",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "playerOUid": {
+          "type": "string",
+          "description": "UID of Player O, AI_MINIMAX, or OPEN_SEAT",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "playerOName": {
+          "type": "string",
+          "description": "Display name for Player O",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "participantUids": {
+          "type": "array",
+          "description": "Bounded list (1 to 2 items) of authenticated participant UIDs"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["waiting", "active", "closed"],
+          "description": "Match lifecycle status"
+        },
+        "eventCount": {
+          "type": "integer",
+          "description": "Monotonic count of appended events in the events subcollection"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of match creation"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of latest update"
+        }
+      },
+      "required": [
+        "gameId",
+        "mode",
+        "aiDifficulty",
+        "creatorUid",
+        "playerXUid",
+        "playerXName",
+        "playerOUid",
+        "playerOName",
+        "participantUids",
+        "status",
+        "eventCount",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "GameEvent": {
+      "title": "GameEvent",
+      "description": "Immutable event-sourced turn record (MOVE or RESTORE) stored under a match.",
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "description": "1-based sequential event number"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["MOVE", "RESTORE"],
+          "description": "Event type"
+        },
+        "actorUid": {
+          "type": "string",
+          "description": "UID of the authenticated user recording this event",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "actorName": {
+          "type": "string",
+          "description": "Display name of the actor",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "player": {
+          "type": "string",
+          "enum": ["X", "O", "NONE"],
+          "description": "Mark placed for MOVE events, or NONE for RESTORE"
+        },
+        "cell": {
+          "type": "integer",
+          "description": "Board index 0-8 for MOVE events, or -1 for RESTORE"
+        },
+        "targetSeq": {
+          "type": "integer",
+          "description": "Target sequence number to restore to for RESTORE events, or -1 for MOVE"
+        },
+        "isAiMove": {
+          "type": "boolean",
+          "description": "Whether the move was computed by the Minimax AI algorithm"
+        },
+        "participantUids": {
+          "type": "array",
+          "description": "Bounded list (1 to 2 items) matching parent match participantUids for query security"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of event creation"
+        }
+      },
+      "required": [
+        "seq",
+        "type",
+        "actorUid",
+        "actorName",
+        "player",
+        "cell",
+        "targetSeq",
+        "isAiMove",
+        "participantUids",
+        "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Authenticated user display profiles without PII."
+    },
+    "/games/{gameId}": {
+      "schema": { "$ref": "#/entities/GameMatch" },
+      "description": "Tic-Tac-Toe match documents keyed by short uppercase share code."
+    },
+    "/games/{gameId}/events/{eventId}": {
+      "schema": { "$ref": "#/entities/GameEvent" },
+      "description": "Append-only event-sourced turn history (MOVE and RESTORE events) keyed by evt_{seq}."
+    }
+  }
+}

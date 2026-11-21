@@ -1,0 +1,63 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Silkscreen", ui-monospace, SFMono-Regular, monospace;
+  --font-sans: "DM Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+@layer base {
+  body {
+    font-family: var(--font-sans);
+    background-color: #EFECE2;
+    background-image: radial-gradient(rgba(15, 23, 42, 0.1) 1px, transparent 1px);
+    background-size: 16px 16px;
+    color: #0F172A;
+  }
+
+  h1, h2, h3, .font-display {
+    font-family: var(--font-display);
+  }
+}
+
+@keyframes pixelPop {
+  0% {
+    opacity: 0;
+    transform: scale(0.7);
+  }
+  65% {
+    opacity: 1;
+    transform: scale(1.06);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes strikeDraw {
+  0% {
+    stroke-dashoffset: 400;
+    opacity: 0.4;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+}
+
+.animate-mark-pop {
+  animation: pixelPop 160ms steps(4, end) forwards;
+}
+
+.animate-strike-draw {
+  stroke-dasharray: 400;
+  animation: strikeDraw 220ms steps(8, end) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-mark-pop,
+  .animate-strike-draw {
+    animation: none;
+  }
+}

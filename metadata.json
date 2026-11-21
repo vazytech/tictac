@@ -1,0 +1,6 @@
+{
+  "name": "Tactix",
+  "description": "Event-sourced turn-based Tic-Tac-Toe arena with Minimax AI, shareable multiplayer match codes, and full turn-by-turn time-travel restore.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

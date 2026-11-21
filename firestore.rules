@@ -1,0 +1,323 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net: deny everything by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // Reusable Hardened Global Primitives
+    // -------------------------------------------------------------------------
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidGameCode(gameId) {
+      return gameId is string && gameId.size() >= 6 && gameId.size() <= 12 && gameId.matches('^[A-Z0-9]+$');
+    }
+
+    function isValidEventId(eventId) {
+      return eventId is string && eventId.size() >= 5 && eventId.size() <= 20 && eventId.matches('^evt_[0-9]+$');
+    }
+
+    // -------------------------------------------------------------------------
+    // Entity Validation Blueprints (Anti-Update-Gap)
+    // -------------------------------------------------------------------------
+    function isValidUserProfile(data, userId) {
+      return data.keys().hasAll(['uid', 'displayName', 'photoURL', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'displayName', 'photoURL', 'createdAt', 'updatedAt'])
+        && data.uid is string
+        && isValidId(data.uid)
+        && data.uid == userId
+        && data.uid == request.auth.uid
+        && data.displayName is string
+        && data.displayName.size() >= 1
+        && data.displayName.size() <= 64
+        && data.photoURL is string
+        && data.photoURL.size() <= 500
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidParticipantList(listVal) {
+      return listVal is list
+        && listVal.size() >= 1
+        && listVal.size() <= 2
+        && listVal[0] is string
+        && isValidId(listVal[0])
+        && (listVal.size() == 1 || (listVal[1] is string && isValidId(listVal[1])));
+    }
+
+    function isValidGameMatch(data, gameId) {
+      return data.keys().hasAll([
+          'gameId', 'mode', 'aiDifficulty', 'creatorUid',
+          'playerXUid', 'playerXName', 'playerOUid', 'playerOName',
+          'participantUids', 'status', 'eventCount', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'gameId', 'mode', 'aiDifficulty', 'creatorUid',
+          'playerXUid', 'playerXName', 'playerOUid', 'playerOName',
+          'participantUids', 'status', 'eventCount', 'createdAt', 'updatedAt'
+        ])
+        && data.gameId is string
+        && data.gameId == gameId
+        && isValidGameCode(data.gameId)
+        && data.mode is string
+        && (data.mode == 'ai' || data.mode == 'pvp')
+        && data.aiDifficulty is string
+        && (
+          (data.mode == 'ai' && (data.aiDifficulty == 'apprentice' || data.aiDifficulty == 'tactician' || data.aiDifficulty == 'grandmaster')) ||
+          (data.mode == 'pvp' && data.aiDifficulty == 'none')
+        )
+        && data.creatorUid is string
+        && isValidId(data.creatorUid)
+        && data.playerXUid is string
+        && isValidId(data.playerXUid)
+        && data.playerXName is string
+        && data.playerXName.size() >= 1
+        && data.playerXName.size() <= 64
+        && data.playerOUid is string
+        && isValidId(data.playerOUid)
+        && data.playerOName is string
+        && data.playerOName.size() >= 1
+        && data.playerOName.size() <= 64
+        && isValidParticipantList(data.participantUids)
+        && data.status is string
+        && (data.status == 'waiting' || data.status == 'active' || data.status == 'closed')
+        && data.eventCount is int
+        && data.eventCount >= 0
+        && data.eventCount <= 500
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidGameEvent(data, eventId) {
+      return data.keys().hasAll([
+          'seq', 'type', 'actorUid', 'actorName', 'player',
+          'cell', 'targetSeq', 'isAiMove', 'participantUids', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'seq', 'type', 'actorUid', 'actorName', 'player',
+          'cell', 'targetSeq', 'isAiMove', 'participantUids', 'createdAt'
+        ])
+        && data.seq is int
+        && data.seq >= 1
+        && data.seq <= 500
+        && eventId == ('evt_' + string(data.seq))
+        && data.type is string
+        && (data.type == 'MOVE' || data.type == 'RESTORE')
+        && data.actorUid is string
+        && isValidId(data.actorUid)
+        && data.actorUid == request.auth.uid
+        && data.actorName is string
+        && data.actorName.size() >= 1
+        && data.actorName.size() <= 64
+        && data.player is string
+        && data.cell is int
+        && data.targetSeq is int
+        && data.isAiMove is bool
+        && (
+          (data.type == 'MOVE'
+            && (data.player == 'X' || data.player == 'O')
+            && data.cell >= 0 && data.cell <= 8
+            && data.targetSeq == -1) ||
+          (data.type == 'RESTORE'
+            && data.player == 'NONE'
+            && data.cell == -1
+            && data.targetSeq >= 0
+            && data.targetSeq < data.seq
+            && data.isAiMove == false)
+        )
+        && isValidParticipantList(data.participantUids)
+        && data.createdAt is timestamp;
+    }
+
+    function isAuthorizedMoveActor(eventData, parentGame) {
+      return eventData.type == 'RESTORE' || (
+        (eventData.player == 'X' && (
+          (parentGame.playerXUid == request.auth.uid && eventData.isAiMove == false) ||
+          (parentGame.mode == 'ai' && parentGame.playerXUid == 'AI_MINIMAX' && eventData.isAiMove == true)
+        )) ||
+        (eventData.player == 'O' && (
+          (parentGame.playerOUid == request.auth.uid && eventData.isAiMove == false) ||
+          (parentGame.mode == 'ai' && parentGame.playerOUid == 'AI_MINIMAX' && eventData.isAiMove == true)
+        ))
+      );
+    }
+
+    // -------------------------------------------------------------------------
+    // Collection Rules: /users/{userId}
+    // -------------------------------------------------------------------------
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+      allow list: if false;
+
+      allow create: if isVerifiedUser()
+        && isValidId(userId)
+        && request.auth.uid == userId
+        && isValidUserProfile(incoming(), userId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser()
+        && isValidId(userId)
+        && request.auth.uid == userId
+        && isValidUserProfile(incoming(), userId)
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL', 'updatedAt']);
+
+      allow delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // Collection Rules: /games/{gameId}
+    // -------------------------------------------------------------------------
+    match /games/{gameId} {
+      allow get: if isSignedIn()
+        && isValidGameCode(gameId)
+        && (
+          resource == null ||
+          existing().status == 'waiting' ||
+          request.auth.uid in existing().participantUids
+        );
+
+      allow list: if isSignedIn()
+        && request.auth.uid in resource.data.participantUids;
+
+      allow create: if isVerifiedUser()
+        && isValidGameCode(gameId)
+        && isValidGameMatch(incoming(), gameId)
+        && incoming().creatorUid == request.auth.uid
+        && incoming().participantUids.size() == 1
+        && incoming().participantUids[0] == request.auth.uid
+        && incoming().eventCount == 0
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && (
+          (incoming().mode == 'ai'
+            && incoming().status == 'active'
+            && (
+              (incoming().playerXUid == request.auth.uid && incoming().playerOUid == 'AI_MINIMAX') ||
+              (incoming().playerOUid == request.auth.uid && incoming().playerXUid == 'AI_MINIMAX')
+            )
+          ) ||
+          (incoming().mode == 'pvp'
+            && incoming().status == 'waiting'
+            && (
+              (incoming().playerXUid == request.auth.uid && incoming().playerOUid == 'OPEN_SEAT') ||
+              (incoming().playerOUid == request.auth.uid && incoming().playerXUid == 'OPEN_SEAT')
+            )
+          )
+        );
+
+      allow update: if isVerifiedUser()
+        && isValidGameCode(gameId)
+        && isValidGameMatch(incoming(), gameId)
+        && existing().status != 'closed'
+        && incoming().gameId == existing().gameId
+        && incoming().mode == existing().mode
+        && incoming().aiDifficulty == existing().aiDifficulty
+        && incoming().creatorUid == existing().creatorUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          // Action 1: Join a waiting PvP match as the second player
+          (
+            existing().mode == 'pvp'
+            && existing().status == 'waiting'
+            && !(request.auth.uid in existing().participantUids)
+            && incoming().status == 'active'
+            && incoming().eventCount == existing().eventCount
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'playerXUid', 'playerXName', 'playerOUid', 'playerOName',
+              'participantUids', 'status', 'updatedAt'
+            ])
+            && (
+              (existing().playerOUid == 'OPEN_SEAT'
+                && incoming().playerXUid == existing().playerXUid
+                && incoming().playerXName == existing().playerXName
+                && incoming().playerOUid == request.auth.uid
+                && incoming().participantUids.size() == 2
+                && incoming().participantUids[0] == existing().playerXUid
+                && incoming().participantUids[1] == request.auth.uid) ||
+              (existing().playerXUid == 'OPEN_SEAT'
+                && incoming().playerOUid == existing().playerOUid
+                && incoming().playerOName == existing().playerOName
+                && incoming().playerXUid == request.auth.uid
+                && incoming().participantUids.size() == 2
+                && incoming().participantUids[0] == existing().playerOUid
+                && incoming().participantUids[1] == request.auth.uid)
+            )
+          ) ||
+          // Action 2: Record an atomic MOVE or RESTORE event
+          (
+            existing().status == 'active'
+            && request.auth.uid in existing().participantUids
+            && incoming().status == 'active'
+            && incoming().eventCount == existing().eventCount + 1
+            && incoming().diff(existing()).affectedKeys().hasOnly(['eventCount', 'updatedAt'])
+            && existsAfter(/databases/$(database)/documents/games/$(gameId)/events/$('evt_' + string(incoming().eventCount)))
+          ) ||
+          // Action 3: Close/Archive match (terminal lock)
+          (
+            request.auth.uid in existing().participantUids
+            && incoming().status == 'closed'
+            && incoming().eventCount == existing().eventCount
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+          )
+        );
+
+      allow delete: if false;
+
+      // -----------------------------------------------------------------------
+      // Subcollection Rules: /games/{gameId}/events/{eventId}
+      // -----------------------------------------------------------------------
+      match /events/{eventId} {
+        allow get: if isSignedIn()
+          && isValidGameCode(gameId)
+          && isValidEventId(eventId)
+          && exists(/databases/$(database)/documents/games/$(gameId))
+          && (request.auth.uid in get(/databases/$(database)/documents/games/$(gameId)).data.participantUids);
+
+        allow list: if isSignedIn()
+          && request.auth.uid in resource.data.participantUids;
+
+        allow create: if isVerifiedUser()
+          && isValidGameCode(gameId)
+          && isValidEventId(eventId)
+          && isValidGameEvent(incoming(), eventId)
+          && incoming().createdAt == request.time
+          && (request.auth.uid in incoming().participantUids)
+          && exists(/databases/$(database)/documents/games/$(gameId))
+          && get(/databases/$(database)/documents/games/$(gameId)).data.status == 'active'
+          && (request.auth.uid in get(/databases/$(database)/documents/games/$(gameId)).data.participantUids)
+          && incoming().participantUids == get(/databases/$(database)/documents/games/$(gameId)).data.participantUids
+          && isAuthorizedMoveActor(incoming(), get(/databases/$(database)/documents/games/$(gameId)).data)
+          && incoming().seq == get(/databases/$(database)/documents/games/$(gameId)).data.eventCount + 1
+          && getAfter(/databases/$(database)/documents/games/$(gameId)).data.eventCount == incoming().seq;
+
+        allow update, delete: if false;
+      }
+    }
+  }
+}
